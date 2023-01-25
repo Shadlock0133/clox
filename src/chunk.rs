@@ -43,11 +43,20 @@ opcode! {
     }
 }
 
-#[derive(Default)]
 pub struct Chunk {
     code: Vec<u8>,
     lines: Vec<u32>,
     constants: Vec<Value>,
+}
+
+impl Default for Chunk {
+    fn default() -> Self {
+        Self {
+            code: Default::default(),
+            lines: Default::default(),
+            constants: Default::default(),
+        }
+    }
 }
 
 pub type Id = u8;
