@@ -1,15 +1,15 @@
 use crate::{
     chunk::{Chunk, Opcode},
     common::DEBUG_TRACE_EXECUTION,
-    compiler::compile,
+    compiler::{compile, CompileError},
     debug::disassembly_instruction,
     value::{print_value, Value},
 };
 
 pub const STACK_MAX: usize = 256;
 
-pub struct Vm<'a> {
-    chunk: Option<&'a Chunk>,
+pub struct Vm {
+    chunk: Chunk,
     ip: usize,
     stack: [Value; STACK_MAX],
     stack_top: usize,
@@ -17,11 +17,17 @@ pub struct Vm<'a> {
 
 #[derive(Debug)]
 pub enum Error {
-    Compile,
+    Compile(CompileError),
     Runtime,
 }
 
-impl<'a> Default for Vm<'a> {
+impl From<CompileError> for Error {
+    fn from(value: CompileError) -> Self {
+        Self::Compile(value)
+    }
+}
+
+impl Default for Vm {
     fn default() -> Self {
         Self {
             chunk: Default::default(),
@@ -32,10 +38,13 @@ impl<'a> Default for Vm<'a> {
     }
 }
 
-impl<'a> Vm<'a> {
+impl Vm {
     pub fn interpret(&mut self, source: &str) -> Result<(), Error> {
-        compile(source);
-        Ok(())
+        let mut chunk = Chunk::default();
+        compile(source, &mut chunk)?;
+        self.chunk = chunk;
+        self.ip = 0;
+        self.run()
     }
 
     fn push(&mut self, value: Value) {
@@ -49,11 +58,12 @@ impl<'a> Vm<'a> {
     }
 
     fn read_byte(&mut self) -> u8 {
-        self.chunk.unwrap().code()[read_byte(&mut self.ip)]
+        self.chunk.code()[read_byte(&mut self.ip)]
     }
 
     fn get_constant(&mut self) -> Value {
-        self.chunk.unwrap().get_constant(self.read_byte())
+        let id = self.read_byte();
+        self.chunk.get_constant(id)
     }
 
     fn binary_op<F: FnOnce(Value, Value) -> Value>(&mut self, f: F) {
@@ -72,7 +82,7 @@ impl<'a> Vm<'a> {
                     print!(" ]");
                 }
                 println!();
-                disassembly_instruction(self.chunk.unwrap(), self.ip);
+                disassembly_instruction(&self.chunk, self.ip);
             }
             let instruction = self.read_byte();
             match Opcode::from_u8(instruction) {

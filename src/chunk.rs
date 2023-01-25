@@ -62,6 +62,17 @@ impl Chunk {
         &self.code
     }
 
+    pub fn find_constant(&self, value: Value) -> Option<Id> {
+        self.constants
+            .iter()
+            .position(|&x| x == value)
+            .map(|id| id.try_into().unwrap())
+    }
+
+    pub fn constants_len(&self) -> u8 {
+        self.constants.len().try_into().unwrap()
+    }
+
     pub fn disassembly(&self, name: &str) {
         println!("== {name} ==");
 

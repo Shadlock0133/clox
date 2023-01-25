@@ -21,14 +21,12 @@ fn repl() {
         stdout().flush().unwrap();
         let line = {
             let mut buf = String::new();
-            stdin().read_line(&mut buf).unwrap();
+            if let Err(_) = stdin().read_line(&mut buf) {
+                return;
+            }
             buf
         };
-        if line.trim().is_empty() {
-            println!();
-            return;
-        }
-        vm.interpret(&line);
+        let _ = vm.interpret(&line);
     }
 }
 
@@ -43,7 +41,7 @@ fn run_file(path: String) -> ExitCode {
     let mut vm = Vm::default();
     match vm.interpret(&source) {
         Ok(()) => ExitCode::SUCCESS,
-        Err(Error::Compile) => ExitCode::from(65),
+        Err(Error::Compile(_)) => ExitCode::from(65),
         Err(Error::Runtime) => ExitCode::from(70),
     }
 }
