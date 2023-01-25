@@ -119,7 +119,7 @@ impl<'s, 'c> Parser<'s, 'c> {
     }
 
     fn number(&mut self) {
-        let value = self.previous.lexeme.parse().unwrap();
+        let value = Value::Number(self.previous.lexeme.parse().unwrap());
         self.emit_constant(value);
     }
 

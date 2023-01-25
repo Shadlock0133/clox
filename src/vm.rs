@@ -3,7 +3,7 @@ use crate::{
     common::DEBUG_TRACE_EXECUTION,
     compiler::{compile, CompileError},
     debug::disassembly_instruction,
-    value::{print_value, Value},
+    value::{print_value, Value, self},
 };
 
 pub const STACK_MAX: usize = 256;
@@ -32,7 +32,7 @@ impl Default for Vm {
         Self {
             chunk: Default::default(),
             ip: Default::default(),
-            stack: [Default::default(); 256],
+            stack: [value::NIL; 256],
             stack_top: Default::default(),
         }
     }
