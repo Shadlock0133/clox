@@ -2,8 +2,9 @@ use std::mem;
 
 use crate::{
     chunk::{Chunk, Id, Opcode},
+    common::DEBUG_PRINT_CODE,
     scanner::{Scanner, Token, TokenType},
-    value::Value, common::DEBUG_PRINT_CODE,
+    value::Value,
 };
 
 #[derive(Debug)]
@@ -19,7 +20,7 @@ struct Parser<'s, 'c> {
 }
 
 const EMPTY_TOKEN: Token = Token {
-    typ: TokenType::Error,
+    r#type: TokenType::Error,
     lexeme: "",
     line: 0,
 };
@@ -51,7 +52,7 @@ impl<'s, 'c> Parser<'s, 'c> {
         self.panic_mode = true;
 
         eprint!("[line {}] Error", token.line);
-        match token.typ {
+        match token.r#type {
             TokenType::Eof => eprint!(" at end"),
             TokenType::Error => (),
             _ => eprint!(" at '{}'", token.lexeme),
@@ -64,15 +65,15 @@ impl<'s, 'c> Parser<'s, 'c> {
         self.previous = mem::replace(&mut self.current, EMPTY_TOKEN);
         loop {
             self.current = self.scanner.scan_token();
-            if self.current.typ != TokenType::Error {
+            if self.current.r#type != TokenType::Error {
                 break;
             }
             self.error_at_current(self.current.lexeme)
         }
     }
 
-    fn consume(&mut self, typ: TokenType, message: &str) {
-        if self.current.typ == typ {
+    fn consume(&mut self, r#type: TokenType, message: &str) {
+        if self.current.r#type == r#type {
             self.advance();
             return;
         }
@@ -90,7 +91,7 @@ impl<'s, 'c> Parser<'s, 'c> {
     }
 
     fn make_constant(&mut self, value: Value) -> Id {
-        if let Some(id) = self.chunk.find_constant(value) {
+        if let Some(id) = self.chunk.find_constant(&value) {
             return id;
         }
         if self.chunk.constants_len() == Id::MAX {
@@ -119,8 +120,8 @@ impl<'s, 'c> Parser<'s, 'c> {
     }
 
     fn number(&mut self) {
-        let value = Value::Number(self.previous.lexeme.parse().unwrap());
-        self.emit_constant(value);
+        let value = self.previous.lexeme.parse().unwrap();
+        self.emit_constant(Value::Number(value));
     }
 
     fn grouping(&mut self) {
@@ -129,19 +130,32 @@ impl<'s, 'c> Parser<'s, 'c> {
     }
 
     fn unary(&mut self) {
-        let operator = self.previous.typ;
+        let operator = self.previous.r#type;
         self.parse_precedence(Precedence::Unary);
         match operator {
+            TokenType::Bang => self.emit_byte(Opcode::Not.as_u8()),
             TokenType::Minus => self.emit_byte(Opcode::Negate.as_u8()),
             _ => unreachable!(),
         }
     }
 
     fn binary(&mut self) {
-        let operator = self.previous.typ;
+        let operator = self.previous.r#type;
         let rule = get_rule(operator);
         self.parse_precedence(rule.precedence.next());
         match operator {
+            TokenType::BangEqual => {
+                self.emit_bytes(&[Opcode::Equal.as_u8(), Opcode::Not.as_u8()])
+            }
+            TokenType::EqualEqual => self.emit_byte(Opcode::Equal.as_u8()),
+            TokenType::Greater => self.emit_byte(Opcode::Greater.as_u8()),
+            TokenType::GreaterEqual => {
+                self.emit_bytes(&[Opcode::Less.as_u8(), Opcode::Not.as_u8()])
+            }
+            TokenType::Less => self.emit_byte(Opcode::Less.as_u8()),
+            TokenType::LessEqual => {
+                self.emit_bytes(&[Opcode::Greater.as_u8(), Opcode::Not.as_u8()])
+            }
             TokenType::Plus => self.emit_byte(Opcode::Add.as_u8()),
             TokenType::Minus => self.emit_byte(Opcode::Subtract.as_u8()),
             TokenType::Star => self.emit_byte(Opcode::Multiply.as_u8()),
@@ -150,9 +164,18 @@ impl<'s, 'c> Parser<'s, 'c> {
         }
     }
 
+    fn literal(&mut self) {
+        match self.previous.r#type {
+            TokenType::False => self.emit_byte(Opcode::False.as_u8()),
+            TokenType::Nil => self.emit_byte(Opcode::Nil.as_u8()),
+            TokenType::True => self.emit_byte(Opcode::True.as_u8()),
+            _ => unreachable!(),
+        }
+    }
+
     fn parse_precedence(&mut self, precedence: Precedence) {
         self.advance();
-        let prefix_rule = get_rule(self.previous.typ).prefix;
+        let prefix_rule = get_rule(self.previous.r#type).prefix;
         match prefix_rule {
             Some(rule) => rule(self),
             None => {
@@ -160,9 +183,9 @@ impl<'s, 'c> Parser<'s, 'c> {
                 return;
             }
         }
-        while precedence <= get_rule(self.current.typ).precedence {
+        while precedence <= get_rule(self.current.r#type).precedence {
             self.advance();
-            let infix_rule = get_rule(self.previous.typ).infix;
+            let infix_rule = get_rule(self.previous.r#type).infix;
             infix_rule.unwrap()(self);
         }
     }
@@ -178,53 +201,54 @@ struct ParseRule<'s, 'c> {
     precedence: Precedence,
 }
 
-fn get_rule<'s, 'c>(typ: TokenType) -> ParseRule<'s, 'c> {
+fn get_rule<'s, 'c>(r#type: TokenType) -> ParseRule<'s, 'c> {
     use Parser as P;
     use Precedence as Pr;
+    use TokenType as TT;
 
     #[rustfmt::skip]
     let (prefix, infix, precedence): (Option<ParseFn>, Option<ParseFn>, _) =
-    match typ {
-        TokenType::LeftParen =>    (Some(P::grouping), None, Pr::None),
-        TokenType::RightParen =>   (None, None, Pr::None),
-        TokenType::LeftBrace =>    (None, None, Pr::None),
-        TokenType::RightBrace =>   (None, None, Pr::None),
-        TokenType::Comma =>        (None, None, Pr::None),
-        TokenType::Dot =>          (None, None, Pr::None),
-        TokenType::Minus =>        (Some(P::unary), Some(P::binary), Pr::Term),
-        TokenType::Plus =>         (None, Some(P::binary), Pr::Term),
-        TokenType::Semicolon =>    (None, None, Pr::None),
-        TokenType::Slash =>        (None, Some(P::binary), Pr::Factor),
-        TokenType::Star =>         (None, Some(P::binary), Pr::Factor),
-        TokenType::Bang =>         (None, None, Pr::None),
-        TokenType::BangEqual =>    (None, None, Pr::None),
-        TokenType::Equal =>        (None, None, Pr::None),
-        TokenType::EqualEqual =>   (None, None, Pr::None),
-        TokenType::Greater =>      (None, None, Pr::None),
-        TokenType::GreaterEqual => (None, None, Pr::None),
-        TokenType::Less =>         (None, None, Pr::None),
-        TokenType::LessEqual =>    (None, None, Pr::None),
-        TokenType::Identifier =>   (None, None, Pr::None),
-        TokenType::String =>       (None, None, Pr::None),
-        TokenType::Number =>       (Some(P::number), None, Pr::None),
-        TokenType::And =>          (None, None, Pr::None),
-        TokenType::Class =>        (None, None, Pr::None),
-        TokenType::Else =>         (None, None, Pr::None),
-        TokenType::False =>        (None, None, Pr::None),
-        TokenType::For =>          (None, None, Pr::None),
-        TokenType::Fun =>          (None, None, Pr::None),
-        TokenType::If =>           (None, None, Pr::None),
-        TokenType::Nil =>          (None, None, Pr::None),
-        TokenType::Or =>           (None, None, Pr::None),
-        TokenType::Print =>        (None, None, Pr::None),
-        TokenType::Return =>       (None, None, Pr::None),
-        TokenType::Super =>        (None, None, Pr::None),
-        TokenType::This =>         (None, None, Pr::None),
-        TokenType::True =>         (None, None, Pr::None),
-        TokenType::Var =>          (None, None, Pr::None),
-        TokenType::While =>        (None, None, Pr::None),
-        TokenType::Error =>        (None, None, Pr::None),
-        TokenType::Eof =>          (None, None, Pr::None),
+    match r#type {
+        TT::LeftParen =>    (Some(P::grouping),            None, Pr::None),
+        TT::RightParen =>   (             None,            None, Pr::None),
+        TT::LeftBrace =>    (             None,            None, Pr::None),
+        TT::RightBrace =>   (             None,            None, Pr::None),
+        TT::Comma =>        (             None,            None, Pr::None),
+        TT::Dot =>          (             None,            None, Pr::None),
+        TT::Minus =>        (   Some(P::unary), Some(P::binary), Pr::Term),
+        TT::Plus =>         (             None, Some(P::binary), Pr::Term),
+        TT::Semicolon =>    (             None,            None, Pr::None),
+        TT::Slash =>        (             None, Some(P::binary), Pr::Factor),
+        TT::Star =>         (             None, Some(P::binary), Pr::Factor),
+        TT::Bang =>         (   Some(P::unary),            None, Pr::None),
+        TT::BangEqual =>    (             None, Some(P::binary), Pr::Equality),
+        TT::Equal =>        (             None,            None, Pr::None),
+        TT::EqualEqual =>   (             None, Some(P::binary), Pr::Equality),
+        TT::Greater =>      (             None, Some(P::binary), Pr::Comparison),
+        TT::GreaterEqual => (             None, Some(P::binary), Pr::Comparison),
+        TT::Less =>         (             None, Some(P::binary), Pr::Comparison),
+        TT::LessEqual =>    (             None, Some(P::binary), Pr::Comparison),
+        TT::Identifier =>   (             None,            None, Pr::None),
+        TT::String =>       (             None,            None, Pr::None),
+        TT::Number =>       (  Some(P::number),            None, Pr::None),
+        TT::And =>          (             None,            None, Pr::None),
+        TT::Class =>        (             None,            None, Pr::None),
+        TT::Else =>         (             None,            None, Pr::None),
+        TT::False =>        ( Some(P::literal),            None, Pr::None),
+        TT::For =>          (             None,            None, Pr::None),
+        TT::Fun =>          (             None,            None, Pr::None),
+        TT::If =>           (             None,            None, Pr::None),
+        TT::Nil =>          ( Some(P::literal),            None, Pr::None),
+        TT::Or =>           (             None,            None, Pr::None),
+        TT::Print =>        (             None,            None, Pr::None),
+        TT::Return =>       (             None,            None, Pr::None),
+        TT::Super =>        (             None,            None, Pr::None),
+        TT::This =>         (             None,            None, Pr::None),
+        TT::True =>         ( Some(P::literal),            None, Pr::None),
+        TT::Var =>          (             None,            None, Pr::None),
+        TT::While =>        (             None,            None, Pr::None),
+        TT::Error =>        (             None,            None, Pr::None),
+        TT::Eof =>          (             None,            None, Pr::None),
     };
     ParseRule {
         prefix,

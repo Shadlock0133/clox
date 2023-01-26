@@ -49,7 +49,7 @@ pub enum TokenType {
 
 #[derive(Clone)]
 pub struct Token<'s> {
-    pub typ: TokenType,
+    pub r#type: TokenType,
     pub lexeme: &'s str,
     pub line: u32,
 }
@@ -94,16 +94,16 @@ impl<'s> Scanner<'s> {
         if self.is_at_end() {
             return false;
         }
-        if self.peek() == expected {
+        if self.peek() != expected {
             return false;
         }
         self.advance();
         true
     }
 
-    fn make_token(&self, typ: TokenType) -> Token<'s> {
+    fn make_token(&self, r#type: TokenType) -> Token<'s> {
         Token {
-            typ,
+            r#type,
             lexeme: &self.source[self.start..self.current],
             line: self.line,
         }
@@ -111,7 +111,7 @@ impl<'s> Scanner<'s> {
 
     fn error_token(&self, message: &'static str) -> Token<'static> {
         Token {
-            typ: TokenType::Error,
+            r#type: TokenType::Error,
             lexeme: message,
             line: self.line,
         }
@@ -227,36 +227,36 @@ impl<'s> Scanner<'s> {
             '/' => return self.make_token(TokenType::Slash),
             '*' => return self.make_token(TokenType::Star),
             '!' => {
-                let typ = if self.matches('=') {
+                let r#type = if self.matches('=') {
                     TokenType::BangEqual
                 } else {
                     TokenType::Bang
                 };
-                return self.make_token(typ);
+                return self.make_token(r#type);
             }
             '=' => {
-                let typ = if self.matches('=') {
+                let r#type = if self.matches('=') {
                     TokenType::EqualEqual
                 } else {
                     TokenType::Equal
                 };
-                return self.make_token(typ);
+                return self.make_token(r#type);
             }
             '<' => {
-                let typ = if self.matches('=') {
+                let r#type = if self.matches('=') {
                     TokenType::LessEqual
                 } else {
                     TokenType::Less
                 };
-                return self.make_token(typ);
+                return self.make_token(r#type);
             }
             '>' => {
-                let typ = if self.matches('=') {
+                let r#type = if self.matches('=') {
                     TokenType::GreaterEqual
                 } else {
                     TokenType::Greater
                 };
-                return self.make_token(typ);
+                return self.make_token(r#type);
             }
             '"' => return self.string(),
             _ => (),

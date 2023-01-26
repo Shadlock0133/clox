@@ -34,29 +34,27 @@ opcode! {
     #[derive(Clone, Copy)]
     pub enum Opcode: u8 {
         Return,
+        Constant,
+        Nil,
+        True,
+        False,
+        Equal,
+        Greater,
+        Less,
         Add,
         Subtract,
         Multiply,
         Divide,
+        Not,
         Negate,
-        Constant,
     }
 }
 
+#[derive(Default)]
 pub struct Chunk {
     code: Vec<u8>,
     lines: Vec<u32>,
     constants: Vec<Value>,
-}
-
-impl Default for Chunk {
-    fn default() -> Self {
-        Self {
-            code: Default::default(),
-            lines: Default::default(),
-            constants: Default::default(),
-        }
-    }
 }
 
 pub type Id = u8;
@@ -71,10 +69,10 @@ impl Chunk {
         &self.code
     }
 
-    pub fn find_constant(&self, value: Value) -> Option<Id> {
+    pub fn find_constant(&self, value: &Value) -> Option<Id> {
         self.constants
             .iter()
-            .position(|&x| x == value)
+            .position(|x| x == value)
             .map(|id| id.try_into().unwrap())
     }
 
@@ -97,8 +95,12 @@ impl Chunk {
         id.try_into().unwrap()
     }
 
-    pub fn get_constant(&self, id: Id) -> Value {
-        self.constants[usize::from(id)]
+    pub fn get_constant(&self, id: Id) -> &Value {
+        &self.constants[usize::from(id)]
+    }
+
+    pub fn get_line(&self, offset: usize) -> u32 {
+        self.lines[offset]
     }
 
     pub fn get_line_if_first(&self, offset: usize) -> Option<u32> {

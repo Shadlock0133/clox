@@ -3,7 +3,7 @@ use crate::{
     common::DEBUG_TRACE_EXECUTION,
     compiler::{compile, CompileError},
     debug::disassembly_instruction,
-    value::{print_value, Value, self},
+    value::{self, print_value, values_equal, Value},
 };
 
 pub const STACK_MAX: usize = 256;
@@ -47,6 +47,17 @@ impl Vm {
         self.run()
     }
 
+    fn reset_stack(&mut self) {
+        self.stack_top = 0;
+    }
+
+    fn runtime_error(&mut self, message: &str) {
+        eprintln!("{message}");
+        let line = self.chunk.get_line(self.ip - 1);
+        eprintln!("[line {line}] in script");
+        self.reset_stack();
+    }
+
     fn push(&mut self, value: Value) {
         self.stack[self.stack_top] = value;
         self.stack_top += 1;
@@ -54,22 +65,36 @@ impl Vm {
 
     fn pop(&mut self) -> Value {
         self.stack_top -= 1;
-        self.stack[self.stack_top]
+        std::mem::replace(&mut self.stack[self.stack_top], Value::Nil)
+    }
+
+    fn peek(&self, distance: usize) -> &Value {
+        &self.stack[self.stack_top - distance]
     }
 
     fn read_byte(&mut self) -> u8 {
-        self.chunk.code()[read_byte(&mut self.ip)]
+        self.chunk.code()[read_and_inc(&mut self.ip)]
     }
 
-    fn get_constant(&mut self) -> Value {
+    fn get_constant(&mut self) -> &Value {
         let id = self.read_byte();
         self.chunk.get_constant(id)
     }
 
-    fn binary_op<F: FnOnce(Value, Value) -> Value>(&mut self, f: F) {
+    fn binary_op<F: FnOnce(f64, f64) -> Value>(
+        &mut self,
+        f: F,
+    ) -> Result<(), Error> {
         let b = self.pop();
         let a = self.pop();
-        self.push(f(a, b));
+        match (a, b) {
+            (Value::Number(a), Value::Number(b)) => self.push(f(a, b)),
+            _ => {
+                self.runtime_error("Operands must be numbers.");
+                return Err(Error::Runtime);
+            }
+        }
+        Ok(())
     }
 
     fn run(&mut self) -> Result<(), Error> {
@@ -78,7 +103,7 @@ impl Vm {
                 print!("          ");
                 for value in &self.stack[..self.stack_top] {
                     print!("[ ");
-                    print_value(*value);
+                    print_value(value);
                     print!(" ]");
                 }
                 println!();
@@ -87,23 +112,54 @@ impl Vm {
             let instruction = self.read_byte();
             match Opcode::from_u8(instruction) {
                 Some(Opcode::Constant) => {
-                    let constant = self.get_constant();
+                    let constant = self.get_constant().clone();
                     self.push(constant);
                 }
-                Some(Opcode::Add) => self.binary_op(|a, b| a + b),
-                Some(Opcode::Subtract) => self.binary_op(|a, b| a - b),
-                Some(Opcode::Multiply) => self.binary_op(|a, b| a * b),
-                Some(Opcode::Divide) => self.binary_op(|a, b| a / b),
+                Some(Opcode::Nil) => self.push(Value::Nil),
+                Some(Opcode::True) => self.push(Value::Bool(true)),
+                Some(Opcode::False) => self.push(Value::Bool(false)),
+                Some(Opcode::Equal) => {
+                    let b = self.pop();
+                    let a = self.pop();
+                    self.push(Value::Bool(values_equal(a, b)));
+                }
+                Some(Opcode::Greater) => {
+                    self.binary_op(|a, b| Value::Bool(a > b))?
+                }
+                Some(Opcode::Less) => {
+                    self.binary_op(|a, b| Value::Bool(a < b))?
+                }
+                Some(Opcode::Add) => {
+                    self.binary_op(|a, b| Value::Number(a + b))?
+                }
+                Some(Opcode::Subtract) => {
+                    self.binary_op(|a, b| Value::Number(a - b))?
+                }
+                Some(Opcode::Multiply) => {
+                    self.binary_op(|a, b| Value::Number(a * b))?
+                }
+                Some(Opcode::Divide) => {
+                    self.binary_op(|a, b| Value::Number(a / b))?
+                }
                 Some(Opcode::Negate) => {
-                    let value = -self.pop();
-                    self.push(value);
+                    let value = self.pop();
+                    if let Value::Number(n) = value {
+                        self.push(Value::Number(-n));
+                    } else {
+                        self.runtime_error("Operand must be a number.");
+                        return Err(Error::Runtime);
+                    }
+                }
+                Some(Opcode::Not) => {
+                    let value = self.pop();
+                    self.push(Value::Bool(is_falsey(value)));
                 }
                 Some(Opcode::Return) => {
-                    print_value(self.pop());
+                    print_value(&self.pop());
                     println!();
                     return Ok(());
                 }
-                _ => {
+                None => {
                     println!("unknown instruction: {instruction}");
                     return Err(Error::Runtime);
                 }
@@ -112,8 +168,15 @@ impl Vm {
     }
 }
 
-fn read_byte(value: &mut usize) -> usize {
+fn read_and_inc(value: &mut usize) -> usize {
     let ret = *value;
     *value += 1;
     ret
+}
+
+fn is_falsey(value: Value) -> bool {
+    match value {
+        Value::Nil | Value::Bool(false) => true,
+        _ => false,
+    }
 }
