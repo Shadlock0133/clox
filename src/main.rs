@@ -5,6 +5,7 @@ mod debug;
 mod scanner;
 mod value;
 mod vm;
+mod table;
 
 use std::{
     env, fs,

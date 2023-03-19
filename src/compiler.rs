@@ -124,6 +124,17 @@ impl<'s, 'c> Parser<'s, 'c> {
         self.emit_constant(Value::Number(value));
     }
 
+    fn string(&mut self) {
+        let s = self
+            .previous
+            .lexeme
+            .strip_prefix('"')
+            .unwrap()
+            .strip_suffix('"')
+            .unwrap();
+        self.emit_constant(Value::string(String::from(s)))
+    }
+
     fn grouping(&mut self) {
         self.expression();
         self.consume(TokenType::RightParen, "Expect ')' after expression.");
@@ -229,7 +240,7 @@ fn get_rule<'s, 'c>(r#type: TokenType) -> ParseRule<'s, 'c> {
         TT::Less =>         (             None, Some(P::binary), Pr::Comparison),
         TT::LessEqual =>    (             None, Some(P::binary), Pr::Comparison),
         TT::Identifier =>   (             None,            None, Pr::None),
-        TT::String =>       (             None,            None, Pr::None),
+        TT::String =>       (  Some(P::string),            None, Pr::None),
         TT::Number =>       (  Some(P::number),            None, Pr::None),
         TT::And =>          (             None,            None, Pr::None),
         TT::Class =>        (             None,            None, Pr::None),

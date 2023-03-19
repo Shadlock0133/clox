@@ -8,6 +8,7 @@ use crate::{
 
 pub const STACK_MAX: usize = 256;
 
+// todo: string interning
 pub struct Vm {
     chunk: Chunk,
     ip: usize,
@@ -130,7 +131,22 @@ impl Vm {
                     self.binary_op(|a, b| Value::Bool(a < b))?
                 }
                 Some(Opcode::Add) => {
-                    self.binary_op(|a, b| Value::Number(a + b))?
+                    let b = self.pop();
+                    let a = self.pop();
+                    match (a, b) {
+                        (Value::String(a), Value::String(b)) => {
+                            self.push(Value::string(a.into_string() + &b))
+                        }
+                        (Value::Number(a), Value::Number(b)) => {
+                            self.push(Value::Number(a + b))
+                        }
+                        _ => {
+                            self.runtime_error(
+                                "Operands must be numbers or strings.",
+                            );
+                            return Err(Error::Runtime);
+                        }
+                    }
                 }
                 Some(Opcode::Subtract) => {
                     self.binary_op(|a, b| Value::Number(a - b))?
