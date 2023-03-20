@@ -38,6 +38,10 @@ opcode! {
         Nil,
         True,
         False,
+        Pop,
+        GetGlobal,
+        DefineGlobal,
+        SetGlobal,
         Equal,
         Greater,
         Less,
@@ -47,6 +51,7 @@ opcode! {
         Divide,
         Not,
         Negate,
+        Print,
     }
 }
 

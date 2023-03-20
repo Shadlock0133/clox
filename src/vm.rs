@@ -3,17 +3,53 @@ use crate::{
     common::DEBUG_TRACE_EXECUTION,
     compiler::{compile, CompileError},
     debug::disassembly_instruction,
+    table::Table,
     value::{self, print_value, values_equal, Value},
 };
 
 pub const STACK_MAX: usize = 256;
 
 // todo: string interning
+#[derive(Default)]
 pub struct Vm {
     chunk: Chunk,
     ip: usize,
-    stack: [Value; STACK_MAX],
-    stack_top: usize,
+    stack: Stack,
+    globals: Table,
+}
+
+struct Stack {
+    storage: [Value; STACK_MAX],
+    top: usize,
+}
+
+impl Default for Stack {
+    fn default() -> Self {
+        Self {
+            storage: [value::NIL; 256],
+            top: Default::default(),
+        }
+    }
+}
+
+impl Stack {
+    fn reset(&mut self) {
+        self.top = 0;
+    }
+
+    fn push(&mut self, value: Value) {
+        self.storage[self.top] = value;
+        self.top += 1;
+    }
+
+    fn pop(&mut self) -> Value {
+        self.top -= 1;
+        std::mem::replace(&mut self.storage[self.top], Value::Nil)
+    }
+
+    fn peek(&self, distance: usize) -> &Value {
+        &self.storage[self.top - distance - 1]
+    }
 }
 
 #[derive(Debug)]
@@ -28,17 +64,6 @@ impl From<CompileError> for Error {
     }
 }
 
-impl Default for Vm {
-    fn default() -> Self {
-        Self {
-            chunk: Default::default(),
-            ip: Default::default(),
-            stack: [value::NIL; 256],
-            stack_top: Default::default(),
-        }
-    }
-}
-
 impl Vm {
     pub fn interpret(&mut self, source: &str) -> Result<(), Error> {
         let mut chunk = Chunk::default();
@@ -49,7 +74,7 @@ impl Vm {
     }
 
     fn reset_stack(&mut self) {
-        self.stack_top = 0;
+        self.stack.reset()
     }
 
     fn runtime_error(&mut self, message: &str) {
@@ -60,26 +85,31 @@ impl Vm {
     }
 
     fn push(&mut self, value: Value) {
-        self.stack[self.stack_top] = value;
-        self.stack_top += 1;
+        self.stack.push(value);
     }
 
     fn pop(&mut self) -> Value {
-        self.stack_top -= 1;
-        std::mem::replace(&mut self.stack[self.stack_top], Value::Nil)
+        self.stack.pop()
     }
 
     fn peek(&self, distance: usize) -> &Value {
-        &self.stack[self.stack_top - distance]
+        self.stack.peek(distance)
     }
 
     fn read_byte(&mut self) -> u8 {
         self.chunk.code()[read_and_inc(&mut self.ip)]
     }
 
-    fn get_constant(&mut self) -> &Value {
+    fn read_constant(&mut self) -> &Value {
         let id = self.read_byte();
         self.chunk.get_constant(id)
+    }
+
+    fn read_string(&mut self) -> String {
+        match self.read_constant() {
+            Value::String(s) => s.to_string(),
+            _ => unreachable!(),
+        }
     }
 
     fn binary_op<F: FnOnce(f64, f64) -> Value>(
@@ -102,7 +132,7 @@ impl Vm {
         loop {
             if DEBUG_TRACE_EXECUTION {
                 print!("          ");
-                for value in &self.stack[..self.stack_top] {
+                for value in &self.stack.storage[..self.stack.top] {
                     print!("[ ");
                     print_value(value);
                     print!(" ]");
@@ -113,12 +143,43 @@ impl Vm {
             let instruction = self.read_byte();
             match Opcode::from_u8(instruction) {
                 Some(Opcode::Constant) => {
-                    let constant = self.get_constant().clone();
+                    let constant = self.read_constant().clone();
                     self.push(constant);
                 }
                 Some(Opcode::Nil) => self.push(Value::Nil),
                 Some(Opcode::True) => self.push(Value::Bool(true)),
                 Some(Opcode::False) => self.push(Value::Bool(false)),
+                Some(Opcode::Pop) => {
+                    self.pop();
+                }
+                Some(Opcode::GetGlobal) => {
+                    let name = self.read_string();
+                    match self.globals.get(&name) {
+                        Some(value) => self.push(value.clone()),
+                        None => {
+                            self.runtime_error(&format!(
+                                "Undefined variable '{name}'"
+                            ));
+                            return Err(Error::Runtime);
+                        }
+                    }
+                }
+                Some(Opcode::DefineGlobal) => {
+                    let name = self.read_string();
+                    self.globals.set(name, self.peek(0).clone());
+                    self.pop();
+                }
+                Some(Opcode::SetGlobal) => {
+                    let name = self.read_string();
+                    if self.globals.has(&name) {
+                        self.globals.set(name, self.peek(0).clone());
+                    } else {
+                        self.runtime_error(&format!(
+                            "Undefined variable '{name}'"
+                        ));
+                        return Err(Error::Runtime);
+                    }
+                }
                 Some(Opcode::Equal) => {
                     let b = self.pop();
                     let a = self.pop();
@@ -170,9 +231,11 @@ impl Vm {
                     let value = self.pop();
                     self.push(Value::Bool(is_falsey(value)));
                 }
-                Some(Opcode::Return) => {
+                Some(Opcode::Print) => {
                     print_value(&self.pop());
                     println!();
+                }
+                Some(Opcode::Return) => {
                     return Ok(());
                 }
                 None => {

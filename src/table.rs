@@ -4,13 +4,13 @@ use crate::value::{hash, ThinString, Value};
 
 #[derive(Default)]
 pub struct Table {
-    entries: Box<[Entry]>,
+    entries: Box<[Slot]>,
     count: usize,
 }
 
 impl Table {
     pub fn set(&mut self, key: String, value: Value) -> bool {
-        if self.count * 4 > self.capacity() * 3 {
+        if self.count * 4 >= self.capacity() * 3 {
             let new_capacity = if self.capacity() < 8 {
                 8
             } else {
@@ -19,9 +19,9 @@ impl Table {
             self.realloc(new_capacity);
         }
         let entry = self.find_mut(&key);
-        let is_new_key = !matches!(entry, Entry::Occupied(_));
-        let was_tombstone = matches!(entry, Entry::Tombstone);
-        *entry = Entry::Occupied(OccupiedEntry {
+        let is_new_key = !matches!(entry, Slot::Occupied(_));
+        let was_tombstone = matches!(entry, Slot::Tombstone);
+        *entry = Slot::Occupied(OccupiedEntry {
             key: ThinString::new(key),
             value,
         });
@@ -31,12 +31,16 @@ impl Table {
         is_new_key
     }
 
+    pub fn has(&self, key: &str) -> bool {
+        self.get(key).is_some()
+    }
+
     pub fn get(&self, key: &str) -> Option<&Value> {
         if self.count == 0 {
             return None;
         }
         match self.find(key) {
-            Entry::Occupied(OccupiedEntry { value, .. }) => Some(value),
+            Slot::Occupied(OccupiedEntry { value, .. }) => Some(value),
             _ => None,
         }
     }
@@ -46,7 +50,7 @@ impl Table {
             return None;
         }
         match self.find_mut(key) {
-            Entry::Occupied(OccupiedEntry { value, .. }) => Some(value),
+            Slot::Occupied(OccupiedEntry { value, .. }) => Some(value),
             _ => None,
         }
     }
@@ -56,10 +60,10 @@ impl Table {
             return None;
         }
         match self.find_mut(key) {
-            entry @ Entry::Occupied(_) => {
-                let entry = std::mem::replace(entry, Entry::Tombstone);
+            entry @ Slot::Occupied(_) => {
+                let entry = std::mem::replace(entry, Slot::Tombstone);
                 let value = match entry {
-                    Entry::Occupied(OccupiedEntry { value, .. }) => value,
+                    Slot::Occupied(OccupiedEntry { value, .. }) => value,
                     _ => unreachable!(),
                 };
                 Some(value)
@@ -71,13 +75,13 @@ impl Table {
     fn realloc(&mut self, new_capacity: usize) {
         self.count = 0;
         let new_entries =
-            repeat_with(|| Entry::Vacant).take(new_capacity).collect();
+            repeat_with(|| Slot::Vacant).take(new_capacity).collect();
         let old_entries = std::mem::replace(&mut self.entries, new_entries);
         for entry in old_entries.into_vec() {
-            if let Entry::Occupied(entry) = entry {
+            if let Slot::Occupied(entry) = entry {
                 self.count += 1;
                 let dest = self.find_mut(&entry.key);
-                *dest = Entry::Occupied(entry);
+                *dest = Slot::Occupied(entry);
             }
         }
     }
@@ -90,21 +94,21 @@ impl Table {
     // - occupied entry with same key
     // - first tombstone slot
     // - vacant slot
-    fn find(&self, key: &str) -> &Entry {
+    fn find(&self, key: &str) -> &Slot {
         let mut index = hash(key.as_bytes()) % self.capacity() as u32;
         let mut tombstone = None;
         loop {
             let entry = &self.entries[index as usize];
             match entry {
-                Entry::Occupied(OccupiedEntry { key: entry_key, .. })
+                Slot::Occupied(OccupiedEntry { key: entry_key, .. })
                     if entry_key.as_str() != key =>
                 {
                     ()
                 }
-                Entry::Tombstone => {
+                Slot::Tombstone => {
                     tombstone.get_or_insert(index);
                 }
-                Entry::Occupied(_) | Entry::Vacant => {
+                Slot::Occupied(_) | Slot::Vacant => {
                     if let Some(index) = tombstone {
                         return &self.entries[index as usize];
                     }
@@ -116,21 +120,21 @@ impl Table {
     }
 
     // same as `find`
-    fn find_mut(&mut self, key: &str) -> &mut Entry {
+    fn find_mut(&mut self, key: &str) -> &mut Slot {
         let mut index = hash(key.as_bytes()) % self.capacity() as u32;
         let mut tombstone = None;
         loop {
             let entry = &mut self.entries[index as usize];
             match entry {
-                Entry::Occupied(OccupiedEntry { key: entry_key, .. })
+                Slot::Occupied(OccupiedEntry { key: entry_key, .. })
                     if entry_key.as_str() != key =>
                 {
                     ()
                 }
-                Entry::Tombstone => {
+                Slot::Tombstone => {
                     tombstone.get_or_insert(index);
                 }
-                Entry::Occupied(_) | Entry::Vacant => {
+                Slot::Occupied(_) | Slot::Vacant => {
                     if let Some(index) = tombstone {
                         return &mut self.entries[index as usize];
                     }
@@ -150,7 +154,7 @@ impl Extend<(String, Value)> for Table {
     }
 }
 
-enum Entry {
+enum Slot {
     Occupied(OccupiedEntry),
     Vacant,
     Tombstone,
@@ -162,4 +166,4 @@ struct OccupiedEntry {
 }
 
 // Entry can just reuse Value's tag niches for its tag
-const _: () = assert!(size_of::<Entry>() == size_of::<OccupiedEntry>());
+const _: () = assert!(size_of::<Slot>() == size_of::<OccupiedEntry>());
