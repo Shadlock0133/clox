@@ -72,6 +72,20 @@ impl Table {
         }
     }
 
+    // pub fn entry(&mut self, key: String) -> Entry {
+    //     let slot = self.find_mut(&key);
+    //     Entry { slot, key }
+    // }
+
+    pub fn iter(&self) -> impl Iterator<Item = (&str, &Value)> {
+        self.entries.iter().filter_map(|x| match x {
+            Slot::Occupied(OccupiedEntry { key, value }) => {
+                Some((key.as_str(), value))
+            }
+            Slot::Vacant | Slot::Tombstone => None,
+        })
+    }
+
     fn realloc(&mut self, new_capacity: usize) {
         self.count = 0;
         let new_entries =
@@ -153,6 +167,23 @@ impl Extend<(String, Value)> for Table {
         }
     }
 }
+
+// pub struct Entry<'map> {
+//     slot: &'map mut Slot,
+//     key: String,
+// }
+
+// impl Entry<'_> {
+//     pub fn set_if_empty(self, new_value: Value) -> bool {
+//         match self.slot {
+//             Slot::Occupied(OccupiedEntry { value, .. }) => {
+//                 *value = new_value;
+//                 true
+//             }
+//             Slot::Vacant | Slot::Tombstone => false,
+//         }
+//     }
+// }
 
 enum Slot {
     Occupied(OccupiedEntry),

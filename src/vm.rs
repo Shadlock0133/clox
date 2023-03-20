@@ -128,6 +128,19 @@ impl Vm {
         Ok(())
     }
 
+    fn print_similar_names(&self, _name: &str) {
+        return; // TODO
+        fn _levenshtein_distance(_a: &str, _b: &str) -> usize {
+            todo!()
+        }
+
+        // for (global_name, _) in self.globals.iter() {
+        //     if _levenshtein_distance(_name, global_name) < 3 {
+        //         eprintln!("did you meant: '{global_name}'?");
+        //     }
+        // }
+    }
+
     fn run(&mut self) -> Result<(), Error> {
         loop {
             if DEBUG_TRACE_EXECUTION {
@@ -160,6 +173,7 @@ impl Vm {
                             self.runtime_error(&format!(
                                 "Undefined variable '{name}'"
                             ));
+                            self.print_similar_names(&name);
                             return Err(Error::Runtime);
                         }
                     }
@@ -171,12 +185,13 @@ impl Vm {
                 }
                 Some(Opcode::SetGlobal) => {
                     let name = self.read_string();
-                    if self.globals.has(&name) {
-                        self.globals.set(name, self.peek(0).clone());
+                    if let Some(value) = self.globals.get_mut(&name) {
+                        *value = self.stack.peek(0).clone();
                     } else {
                         self.runtime_error(&format!(
                             "Undefined variable '{name}'"
                         ));
+                        self.print_similar_names(&name);
                         return Err(Error::Runtime);
                     }
                 }
