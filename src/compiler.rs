@@ -10,9 +10,10 @@ use crate::{
 #[derive(Debug)]
 pub struct CompileError;
 
-struct Parser<'s, 'c> {
+struct Parser<'s, 'co, 'ch> {
     scanner: Scanner<'s>,
-    chunk: &'c mut Chunk,
+    compiler: &'co mut Compiler<'s>,
+    chunk: &'ch mut Chunk,
     current: Token<'s>,
     previous: Token<'s>,
     had_error: bool,
@@ -25,10 +26,15 @@ const EMPTY_TOKEN: Token = Token {
     line: 0,
 };
 
-impl<'s, 'c> Parser<'s, 'c> {
-    fn new(scanner: Scanner<'s>, chunk: &'c mut Chunk) -> Self {
+impl<'s, 'co, 'ch> Parser<'s, 'co, 'ch> {
+    fn new(
+        scanner: Scanner<'s>,
+        compiler: &'co mut Compiler,
+        chunk: &'ch mut Chunk,
+    ) -> Self {
         Self {
             scanner,
+            compiler,
             chunk,
             current: EMPTY_TOKEN,
             previous: EMPTY_TOKEN,
@@ -315,15 +321,15 @@ impl<'s, 'c> Parser<'s, 'c> {
     }
 }
 
-type ParseFn<'s, 'c> = for<'a> fn(&'a mut Parser<'s, 'c>, bool);
+type ParseFn<'s, 'co, 'ch> = for<'a> fn(&'a mut Parser<'s, 'co, 'ch>, bool);
 
-struct ParseRule<'s, 'c> {
-    prefix: Option<ParseFn<'s, 'c>>,
-    infix: Option<ParseFn<'s, 'c>>,
+struct ParseRule<'s, 'co, 'ch> {
+    prefix: Option<ParseFn<'s, 'co, 'ch>>,
+    infix: Option<ParseFn<'s, 'co, 'ch>>,
     precedence: Precedence,
 }
 
-fn get_rule<'s, 'c>(r#type: TokenType) -> ParseRule<'s, 'c> {
+fn get_rule<'s, 'co, 'ch>(r#type: TokenType) -> ParseRule<'s, 'co, 'ch> {
     use Parser as P;
     use Precedence as Pr;
     use TokenType as TT;
@@ -412,9 +418,29 @@ impl Precedence {
     }
 }
 
+struct Compiler<'s> {
+    locals: Vec<Local<'s>>,
+    scope_depth: u8,
+}
+
+impl<'s> Compiler<'s> {
+    fn new() -> Self {
+        Self {
+            locals: vec![],
+            scope_depth: 0,
+        }
+    }
+}
+
+struct Local<'s> {
+    name: Token<'s>,
+    depth: u8,
+}
+
 pub fn compile(source: &str, chunk: &mut Chunk) -> Result<(), CompileError> {
     let scanner = Scanner::new(source);
-    let mut parser = Parser::new(scanner, chunk);
+    let mut compiler = Compiler::new();
+    let mut parser = Parser::new(scanner, &mut compiler, chunk);
 
     parser.advance();
     while !parser.match_(TokenType::Eof) {
