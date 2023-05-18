@@ -165,6 +165,15 @@ impl Vm {
                 Some(Opcode::Pop) => {
                     self.pop();
                 }
+                Some(Opcode::GetLocal) => {
+                    let slot = self.read_byte();
+                    self.push(self.stack.storage[slot as usize].clone());
+                }
+                Some(Opcode::SetLocal) => {
+                    let slot = self.read_byte();
+                    self.stack.storage[slot as usize] =
+                        self.stack.peek(0).clone();
+                }
                 Some(Opcode::GetGlobal) => {
                     let name = self.read_string();
                     match self.globals.get(&name) {
