@@ -108,6 +108,21 @@ impl<'s, 'co, 'ch> Parser<'s, 'co, 'ch> {
         }
     }
 
+    fn emit_loop(&mut self, loop_start: u16) {
+        self.emit_byte(Opcode::Loop.as_u8());
+
+        let offset: u16 =
+            (self.chunk.len() - loop_start + 2).try_into().unwrap();
+        self.emit_bytes(&offset.to_le_bytes());
+    }
+
+    fn emit_jump(&mut self, instruction: u8) -> u16 {
+        self.emit_byte(instruction);
+        let loc = self.chunk.len();
+        self.emit_bytes(&[0xff, 0xff]);
+        loc
+    }
+
     fn make_constant(&mut self, value: Value) -> Id {
         if let Some(id) = self.chunk.find_constant(&value) {
             return id;
@@ -122,6 +137,12 @@ impl<'s, 'co, 'ch> Parser<'s, 'co, 'ch> {
     fn emit_constant(&mut self, value: Value) {
         let id = self.make_constant(value);
         self.emit_bytes(&[Opcode::Constant.as_u8(), id]);
+    }
+
+    fn patch_jump(&mut self, offset: u16) {
+        let jump = self.chunk.len() - offset - 2;
+        self.chunk.code_mut()[offset as usize..][..2]
+            .copy_from_slice(&jump.to_le_bytes());
     }
 
     fn emit_return(&mut self) {
@@ -159,6 +180,17 @@ impl<'s, 'co, 'ch> Parser<'s, 'co, 'ch> {
     fn number(&mut self, _can_assign: bool) {
         let value = self.previous.lexeme.parse().unwrap();
         self.emit_constant(Value::Number(value));
+    }
+
+    fn or_(&mut self, _: bool) {
+        let else_jump = self.emit_jump(Opcode::JumpIfFalse.as_u8());
+        let end_jump = self.emit_jump(Opcode::Jump.as_u8());
+
+        self.patch_jump(else_jump);
+        self.emit_byte(Opcode::Pop.as_u8());
+
+        self.parse_precedence(Precedence::Or);
+        self.patch_jump(end_jump);
     }
 
     fn string(&mut self, _can_assign: bool) {
@@ -271,7 +303,8 @@ impl<'s, 'co, 'ch> Parser<'s, 'co, 'ch> {
     }
 
     fn resolve_local(&mut self, name: &Token) -> Option<u8> {
-        let slot = self.compiler
+        let slot = self
+            .compiler
             .locals
             .iter()
             .rposition(|local| name.lexeme == local.name.lexeme)
@@ -336,6 +369,15 @@ impl<'s, 'co, 'ch> Parser<'s, 'co, 'ch> {
         self.emit_bytes(&[Opcode::DefineGlobal.as_u8(), global])
     }
 
+    fn and_(&mut self, _: bool) {
+        let end_jump = self.emit_jump(Opcode::JumpIfFalse.as_u8());
+
+        self.emit_byte(Opcode::Pop.as_u8());
+        self.parse_precedence(Precedence::And);
+
+        self.patch_jump(end_jump);
+    }
+
     fn expression(&mut self) {
         self.parse_precedence(Precedence::Assignment)
     }
@@ -368,6 +410,21 @@ impl<'s, 'co, 'ch> Parser<'s, 'co, 'ch> {
         self.emit_byte(Opcode::Print.as_u8());
     }
 
+    fn while_statement(&mut self) {
+        let loop_start = self.chunk.len();
+        self.consume(TokenType::LeftParen, "Expect '(' after `while`.");
+        self.expression();
+        self.consume(TokenType::RightParen, "Expect ')' after condition.");
+
+        let exit_jump = self.emit_jump(Opcode::JumpIfFalse.as_u8());
+        self.emit_byte(Opcode::Pop.as_u8());
+        self.statement();
+        self.emit_loop(loop_start);
+
+        self.patch_jump(exit_jump);
+        self.emit_byte(Opcode::Pop.as_u8());
+    }
+
     fn synchronize(&mut self) {
         self.panic_mode = false;
         while !self.check(TokenType::Eof) {
@@ -395,6 +452,69 @@ impl<'s, 'co, 'ch> Parser<'s, 'co, 'ch> {
         self.emit_byte(Opcode::Pop.as_u8());
     }
 
+    fn for_statement(&mut self) {
+        self.begin_scope();
+        self.consume(TokenType::LeftParen, "Expect '(' after 'for'.");
+        if self.match_(TokenType::Semicolon) {
+            // No initializer.
+        } else if self.match_(TokenType::Var) {
+            self.var_declaration();
+        } else {
+            self.expression_statement();
+        }
+
+        let mut loop_start = self.chunk.len();
+        let mut exit_jump = None;
+        if !self.match_(TokenType::Semicolon) {
+            self.expression();
+            self.consume(
+                TokenType::Semicolon,
+                "Expect ';' after loop condition.",
+            );
+
+            exit_jump = Some(self.emit_jump(Opcode::JumpIfFalse.as_u8()));
+            self.emit_byte(Opcode::Pop.as_u8());
+        }
+        if !self.match_(TokenType::Semicolon) {
+            let body_jump = self.emit_jump(Opcode::Jump.as_u8());
+            let increment_start = self.chunk.len();
+            self.expression();
+            self.emit_byte(Opcode::Pop.as_u8());
+            self.consume(TokenType::RightParen, "Expect ')' after clauses.");
+
+            self.emit_loop(loop_start);
+            loop_start = increment_start;
+            self.patch_jump(body_jump);
+        }
+
+        self.statement();
+        self.emit_loop(loop_start);
+        if let Some(exit_jump) = exit_jump {
+            self.patch_jump(exit_jump);
+            self.emit_byte(Opcode::Pop.as_u8());
+        }
+        self.end_scope();
+    }
+
+    fn if_statement(&mut self) {
+        self.consume(TokenType::LeftParen, "Expect '(' after 'if'.");
+        self.expression();
+        self.consume(TokenType::RightParen, "Expect ')' after condition.");
+
+        let then_jump = self.emit_jump(Opcode::JumpIfFalse.as_u8());
+        self.emit_byte(Opcode::Pop.as_u8());
+        self.statement();
+
+        let else_jump = self.emit_jump(Opcode::Jump.as_u8());
+        self.patch_jump(then_jump);
+        self.emit_byte(Opcode::Pop.as_u8());
+        if self.match_(TokenType::Else) {
+            self.statement();
+        }
+
+        self.patch_jump(else_jump);
+    }
+
     fn declaration(&mut self) {
         if self.match_(TokenType::Var) {
             self.var_declaration();
@@ -409,6 +529,12 @@ impl<'s, 'co, 'ch> Parser<'s, 'co, 'ch> {
     fn statement(&mut self) {
         if self.match_(TokenType::Print) {
             self.print_statement();
+        } else if self.match_(TokenType::For) {
+            self.for_statement();
+        } else if self.match_(TokenType::If) {
+            self.if_statement();
+        } else if self.match_(TokenType::While) {
+            self.while_statement();
         } else if self.match_(TokenType::LeftBrace) {
             self.begin_scope();
             self.block();
@@ -457,7 +583,7 @@ fn get_rule<'s, 'co, 'ch>(r#type: TokenType) -> ParseRule<'s, 'co, 'ch> {
         TT::Identifier =>   (Some(P::variable),            None, Pr::None),
         TT::String =>       (  Some(P::string),            None, Pr::None),
         TT::Number =>       (  Some(P::number),            None, Pr::None),
-        TT::And =>          (             None,            None, Pr::None),
+        TT::And =>          (             None,   Some(P::and_), Pr::And),
         TT::Class =>        (             None,            None, Pr::None),
         TT::Else =>         (             None,            None, Pr::None),
         TT::False =>        ( Some(P::literal),            None, Pr::None),
@@ -465,7 +591,7 @@ fn get_rule<'s, 'co, 'ch>(r#type: TokenType) -> ParseRule<'s, 'co, 'ch> {
         TT::Fun =>          (             None,            None, Pr::None),
         TT::If =>           (             None,            None, Pr::None),
         TT::Nil =>          ( Some(P::literal),            None, Pr::None),
-        TT::Or =>           (             None,            None, Pr::None),
+        TT::Or =>           (             None,    Some(P::or_), Pr::Or),
         TT::Print =>        (             None,            None, Pr::None),
         TT::Return =>       (             None,            None, Pr::None),
         TT::Super =>        (             None,            None, Pr::None),

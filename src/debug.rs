@@ -43,6 +43,18 @@ pub fn disassembly_instruction(chunk: &Chunk, offset: usize) -> usize {
         Some(Opcode::Not) => simple_instruction("OP_NOT", offset),
         Some(Opcode::Negate) => simple_instruction("OP_NEGATE", offset),
         Some(Opcode::Print) => simple_instruction("OP_PRINT", offset),
+        Some(Opcode::Jump) => {
+            jump_instruction("OP_JUMP", chunk, JumpDirection::Forward, offset)
+        }
+        Some(Opcode::JumpIfFalse) => jump_instruction(
+            "OP_JUMP_IF_FALSE",
+            chunk,
+            JumpDirection::Forward,
+            offset,
+        ),
+        Some(Opcode::Loop) => {
+            jump_instruction("OP_LOOP", chunk, JumpDirection::Backward, offset)
+        }
         Some(Opcode::Return) => simple_instruction("OP_RETURN", offset),
         None => {
             println!("unknown opcode: {op}");
@@ -61,6 +73,27 @@ fn byte_instruction(name: &str, chunk: &Chunk, offset: usize) -> usize {
     let slot = chunk.code()[offset + 1];
     println!("{name:16} {slot:4}");
     2
+}
+
+enum JumpDirection {
+    Forward,
+    Backward,
+}
+
+fn jump_instruction(
+    name: &str,
+    chunk: &Chunk,
+    dir: JumpDirection,
+    offset: usize,
+) -> usize {
+    let bytes = chunk.code()[offset + 1..][..2].try_into().unwrap();
+    let jump: usize = u16::from_le_bytes(bytes).into();
+    let target = match dir {
+        JumpDirection::Forward => offset + jump + 3,
+        JumpDirection::Backward => offset - jump + 3,
+    };
+    println!("{name:16} {offset:4} -> {target}");
+    3
 }
 
 fn constant_instruction(name: &str, chunk: &Chunk, offset: usize) -> usize {

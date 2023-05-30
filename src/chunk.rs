@@ -54,6 +54,9 @@ opcode! {
         Not,
         Negate,
         Print,
+        Jump,
+        JumpIfFalse,
+        Loop,
     }
 }
 
@@ -74,6 +77,10 @@ impl Chunk {
 
     pub fn code(&self) -> &[u8] {
         &self.code
+    }
+
+    pub fn code_mut(&mut self) -> &mut [u8] {
+        &mut self.code
     }
 
     pub fn find_constant(&self, value: &Value) -> Option<Id> {
@@ -116,5 +123,9 @@ impl Chunk {
         } else {
             Some(self.lines[offset])
         }
+    }
+
+    pub fn len(&self) -> u16 {
+        self.code.len().try_into().unwrap()
     }
 }

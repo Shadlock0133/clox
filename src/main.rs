@@ -3,9 +3,9 @@ mod common;
 mod compiler;
 mod debug;
 mod scanner;
+mod table;
 mod value;
 mod vm;
-mod table;
 
 use std::{
     env, fs,

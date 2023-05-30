@@ -47,6 +47,7 @@ impl Stack {
         std::mem::replace(&mut self.storage[self.top], Value::Nil)
     }
 
+    #[track_caller]
     fn peek(&self, distance: usize) -> &Value {
         &self.storage[self.top - distance - 1]
     }
@@ -92,6 +93,7 @@ impl Vm {
         self.stack.pop()
     }
 
+    #[track_caller]
     fn peek(&self, distance: usize) -> &Value {
         self.stack.peek(distance)
     }
@@ -103,6 +105,12 @@ impl Vm {
     fn read_constant(&mut self) -> &Value {
         let id = self.read_byte();
         self.chunk.get_constant(id)
+    }
+
+    fn read_short(&mut self) -> u16 {
+        let l = self.read_byte();
+        let h = self.read_byte();
+        u16::from_le_bytes([l, h])
     }
 
     fn read_string(&mut self) -> String {
@@ -253,11 +261,25 @@ impl Vm {
                 }
                 Some(Opcode::Not) => {
                     let value = self.pop();
-                    self.push(Value::Bool(is_falsey(value)));
+                    self.push(Value::Bool(is_falsey(&value)));
                 }
                 Some(Opcode::Print) => {
                     print_value(&self.pop());
                     println!();
+                }
+                Some(Opcode::Jump) => {
+                    let offset = self.read_short();
+                    self.ip += offset as usize;
+                }
+                Some(Opcode::JumpIfFalse) => {
+                    let offset = self.read_short();
+                    if is_falsey(self.peek(0)) {
+                        self.ip += offset as usize;
+                    }
+                }
+                Some(Opcode::Loop) => {
+                    let offset = self.read_short();
+                    self.ip -= offset as usize;
                 }
                 Some(Opcode::Return) => {
                     return Ok(());
@@ -277,7 +299,7 @@ fn read_and_inc(value: &mut usize) -> usize {
     ret
 }
 
-fn is_falsey(value: Value) -> bool {
+fn is_falsey(value: &Value) -> bool {
     match value {
         Value::Nil | Value::Bool(false) => true,
         _ => false,
