@@ -1,0 +1,12 @@
+for (var i = 0; i < 4; i = i + 1) {
+    print "i: "; print i;
+    switch (i) {
+        case 0: print "zero";
+        case 1: {
+            var b = false;
+            print "one";
+        }
+        case 3: print "three";
+        default: print "default";
+    }
+}

@@ -39,6 +39,7 @@ opcode! {
         True,
         False,
         Pop,
+        Dup,
         GetLocal,
         GetGlobal,
         DefineGlobal,

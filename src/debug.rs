@@ -17,6 +17,7 @@ pub fn disassembly_instruction(chunk: &Chunk, offset: usize) -> usize {
         Some(Opcode::Nil) => simple_instruction("OP_NIL", offset),
         Some(Opcode::True) => simple_instruction("OP_TRUE", offset),
         Some(Opcode::False) => simple_instruction("OP_FALSE", offset),
+        Some(Opcode::Dup) => simple_instruction("OP_DUP", offset),
         Some(Opcode::Pop) => simple_instruction("OP_POP", offset),
         Some(Opcode::GetLocal) => {
             byte_instruction("OP_GET_LOCAL", chunk, offset)

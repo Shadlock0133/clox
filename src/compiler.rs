@@ -410,6 +410,54 @@ impl<'s, 'co, 'ch> Parser<'s, 'co, 'ch> {
         self.emit_byte(Opcode::Print.as_u8());
     }
 
+    fn switch_statement(&mut self) {
+        self.consume(TokenType::LeftParen, "Expect '(' after `switch`.");
+        self.expression();
+        self.consume(TokenType::RightParen, "Expect ')' after condition.");
+        self.consume(TokenType::LeftBrace, "Expect '{'.");
+        let mut case_jump = None;
+        // yes, this could've been a Vec of exit jumps that get all patched to
+        // end of switch statement, and not this runtime "linked list" of
+        // exit jumps, but this is funnier :3c
+        let mut exit_jump = None;
+        while self.match_(TokenType::Case) {
+            if let Some(case_jump) = case_jump {
+                self.patch_jump(case_jump);
+                self.emit_byte(Opcode::Pop.as_u8()); // drop comparison result
+            }
+            self.emit_byte(Opcode::Dup.as_u8());
+            self.expression();
+            self.consume(TokenType::Colon, "Expect `:` after case expression.");
+
+            self.emit_byte(Opcode::Equal.as_u8());
+            case_jump = Some(self.emit_jump(Opcode::JumpIfFalse.as_u8()));
+            self.emit_byte(Opcode::Pop.as_u8()); // drop comparison result
+            self.emit_byte(Opcode::Pop.as_u8()); // drop switch condition
+
+            self.begin_scope();
+            self.statement();
+            self.end_scope();
+
+            if let Some(exit_jump) = exit_jump {
+                self.patch_jump(exit_jump);
+            }
+            exit_jump = Some(self.emit_jump(Opcode::Jump.as_u8()));
+        }
+        if let Some(case_jump) = case_jump {
+            self.patch_jump(case_jump);
+        }
+        self.emit_byte(Opcode::Pop.as_u8()); // drop switch condition
+        if self.match_(TokenType::Default) {
+            self.consume(TokenType::Colon, "Expect `:` after `default`.");
+
+            self.statement();
+        }
+        if let Some(exit_jump) = exit_jump {
+            self.patch_jump(exit_jump);
+        }
+        self.consume(TokenType::RightBrace, "Expect '}'.");
+    }
+
     fn while_statement(&mut self) {
         let loop_start = self.chunk.len();
         self.consume(TokenType::LeftParen, "Expect '(' after `while`.");
@@ -439,7 +487,8 @@ impl<'s, 'co, 'ch> Parser<'s, 'co, 'ch> {
                 | TokenType::If
                 | TokenType::While
                 | TokenType::Print
-                | TokenType::Return => return,
+                | TokenType::Return
+                | TokenType::Switch => return,
                 _ => (),
             }
             self.advance();
@@ -533,6 +582,8 @@ impl<'s, 'co, 'ch> Parser<'s, 'co, 'ch> {
             self.for_statement();
         } else if self.match_(TokenType::If) {
             self.if_statement();
+        } else if self.match_(TokenType::Switch) {
+            self.switch_statement();
         } else if self.match_(TokenType::While) {
             self.while_statement();
         } else if self.match_(TokenType::LeftBrace) {
@@ -565,6 +616,7 @@ fn get_rule<'s, 'co, 'ch>(r#type: TokenType) -> ParseRule<'s, 'co, 'ch> {
         TT::RightParen =>   (             None,            None, Pr::None),
         TT::LeftBrace =>    (             None,            None, Pr::None),
         TT::RightBrace =>   (             None,            None, Pr::None),
+        TT::Colon =>        (             None,            None, Pr::None),
         TT::Comma =>        (             None,            None, Pr::None),
         TT::Dot =>          (             None,            None, Pr::None),
         TT::Minus =>        (   Some(P::unary), Some(P::binary), Pr::Term),
@@ -584,7 +636,9 @@ fn get_rule<'s, 'co, 'ch>(r#type: TokenType) -> ParseRule<'s, 'co, 'ch> {
         TT::String =>       (  Some(P::string),            None, Pr::None),
         TT::Number =>       (  Some(P::number),            None, Pr::None),
         TT::And =>          (             None,   Some(P::and_), Pr::And),
+        TT::Case =>         (             None,            None, Pr::None),
         TT::Class =>        (             None,            None, Pr::None),
+        TT::Default =>      (             None,            None, Pr::None),
         TT::Else =>         (             None,            None, Pr::None),
         TT::False =>        ( Some(P::literal),            None, Pr::None),
         TT::For =>          (             None,            None, Pr::None),
@@ -595,6 +649,7 @@ fn get_rule<'s, 'co, 'ch>(r#type: TokenType) -> ParseRule<'s, 'co, 'ch> {
         TT::Print =>        (             None,            None, Pr::None),
         TT::Return =>       (             None,            None, Pr::None),
         TT::Super =>        (             None,            None, Pr::None),
+        TT::Switch =>       (             None,            None, Pr::None),
         TT::This =>         (             None,            None, Pr::None),
         TT::True =>         ( Some(P::literal),            None, Pr::None),
         TT::Var =>          (             None,            None, Pr::None),

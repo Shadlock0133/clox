@@ -170,6 +170,9 @@ impl Vm {
                 Some(Opcode::Nil) => self.push(Value::Nil),
                 Some(Opcode::True) => self.push(Value::Bool(true)),
                 Some(Opcode::False) => self.push(Value::Bool(false)),
+                Some(Opcode::Dup) => {
+                    self.push(self.peek(0).clone());
+                }
                 Some(Opcode::Pop) => {
                     self.pop();
                 }
